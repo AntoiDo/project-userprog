@@ -10,6 +10,8 @@ int main(int argc, char* argv[]) {
 
   test_name = "args";
 
+  // printf("this is printf\n");
+  // write(1, "HELLO\n", 6);
   msg("begin");
   msg("argc = %d", argc);
   for (i = 0; i <= argc; i++)

@@ -50,24 +50,66 @@ void userprog_init(void) {
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
    process id, or TID_ERROR if the thread cannot be created. */
-pid_t process_execute(const char* file_name) {
-  char* fn_copy;
+// pid_t process_execute(const char* file_name) {
+//   char* fn_copy;
+//   tid_t tid;
+
+//   sema_init(&temporary, 0);
+//   /* Make a copy of FILE_NAME.
+//      Otherwise there's a race between the caller and load(). */
+//   fn_copy = palloc_get_page(0);
+//   if (fn_copy == NULL)
+//     return TID_ERROR;
+//   strlcpy(fn_copy, file_name, PGSIZE);
+
+//   // char *thread_name, *tmp;
+//   // thread_name = strtok_r(file_name, " ", &tmp);
+//   /* Create a new thread to execute FILE_NAME. */
+//   tid = thread_create(file_name, PRI_DEFAULT, start_process, fn_copy);
+//   if (tid == TID_ERROR)
+//     palloc_free_page(fn_copy);
+//   return tid;
+// }pid_t
+process_execute (const char *file_name) 
+{
+  char *fn_copy;
+  char *file_name_copy;
+  char *save_ptr;
+  char *prog_name;
   tid_t tid;
 
   sema_init(&temporary, 0);
-  /* Make a copy of FILE_NAME.
-     Otherwise there's a race between the caller and load(). */
-  fn_copy = palloc_get_page(0);
+
+  /* Copy full command line for start_process */
+  fn_copy = palloc_get_page (0);
   if (fn_copy == NULL)
     return TID_ERROR;
-  strlcpy(fn_copy, file_name, PGSIZE);
+  strlcpy (fn_copy, file_name, PGSIZE);
 
-  /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create(file_name, PRI_DEFAULT, start_process, fn_copy);
-  if (tid == TID_ERROR)
-    palloc_free_page(fn_copy);
+  /* Copy again to extract program name */
+  file_name_copy = palloc_get_page (0);
+  if (file_name_copy == NULL) {
+    palloc_free_page (fn_copy);
+    return TID_ERROR;
+  }
+  strlcpy (file_name_copy, file_name, PGSIZE);
+
+  /* Extract program name (first token) */
+  prog_name = strtok_r (file_name_copy, " ", &save_ptr);
+
+  /* Create thread with correct name */
+  tid = thread_create (prog_name, PRI_DEFAULT, start_process, fn_copy);
+
+  if (tid == TID_ERROR) {
+    palloc_free_page (fn_copy);
+  }
+
+  /* We no longer need this copy */
+  palloc_free_page (file_name_copy);
+
   return tid;
 }
+
 
 /* A thread function that loads a user process and starts it
    running. */
@@ -80,6 +122,11 @@ static void start_process(void* file_name_) {
   /* Allocate process control block */
   struct process* new_pcb = malloc(sizeof(struct process));
   success = pcb_success = new_pcb != NULL;
+
+  char *file_copy = malloc(strlen(file_name) + 1);
+  strlcpy(file_copy, file_name, strlen(file_name) + 1);
+  char *token, *save_ptr;
+
 
   /* Initialize process control block */
   if (success) {
@@ -100,6 +147,56 @@ static void start_process(void* file_name_) {
     if_.cs = SEL_UCSEG;
     if_.eflags = FLAG_IF | FLAG_MBS;
     success = load(file_name, &if_.eip, &if_.esp);
+  }
+
+  if(success) {
+    int argc = 0;
+    char *argv[128];
+    // Parse the command line arguments
+    for (token = strtok_r(file_copy, " ", &save_ptr); token != NULL; token = strtok_r(NULL, " ", &save_ptr)) {
+      if_.esp -= strlen(token) + 1;
+      memcpy(if_.esp, token, strlen(token) + 1);
+      argv[argc++] = if_.esp; // ???
+    }
+    argv[argc] = 0; // Null-terminate the argv array
+
+    // Word-align the stack pointer
+    if_.esp = (void *)((uintptr_t)if_.esp & 0xfffffffc);
+
+    // Push argv pointers onto the stack
+    for(int i = argc; i >= 0; i--) {
+      if_.esp -= sizeof(char *);
+      memcpy(if_.esp, &argv[i], sizeof(char *));
+    }
+    char **argv_addr = if_.esp;
+    if_.esp -= sizeof(char **);
+    memcpy(if_.esp, &argv_addr, sizeof(char **));
+    
+    // push argc
+    if_.esp -= sizeof(int);
+    memcpy(if_.esp, &argc, sizeof(int));
+    
+    // push fake return address
+    if_.esp -= sizeof(void *);
+    memset(if_.esp, 0, sizeof(void *));
+    free(file_copy);
+    
+//     printf("\n=== FINAL STACK CHECK ===\n");
+// printf("esp = %p\n", if_.esp);
+
+// int fake = *(int *)if_.esp;
+// int user_argc = *(int *)(if_.esp + 4);
+// char **user_argv = *(char ***)(if_.esp + 8);
+
+// printf("fake ret = %d\n", fake);
+// printf("argc     = %d\n", user_argc);
+// printf("argv     = %p\n", user_argv);
+
+// for (int i = 0; i < user_argc; i++) {
+//   printf("argv[%d] = %p -> '%s'\n", i, user_argv[i], user_argv[i]);
+// }
+// printf("argv[%d] = %p (NULL)\n", user_argc, user_argv[user_argc]);
+
   }
 
   /* Handle failure with succesful PCB malloc. Must free the PCB */
@@ -283,11 +380,22 @@ bool load(const char* file_name, void (**eip)(void), void** esp) {
   process_activate();
 
   /* Open executable file. */
-  file = filesys_open(file_name);
-  if (file == NULL) {
-    printf("load: %s: open failed\n", file_name);
-    goto done;
-  }
+  // file = filesys_open(file_name);
+  // if (file == NULL) {
+  //   printf("load: %s: open failed\n", file_name);
+  //   goto done;
+  // }
+  char *copy = malloc(strlen(file_name)+1);
+    strlcpy(copy, file_name, strlen(file_name)+1);
+    char *command, *tmp;
+    command = strtok_r(file_name, " ", &tmp);
+    file = filesys_open (command);
+    free(copy);
+    if (file == NULL)
+    {
+        printf ("load: %s: open failed\n", file_name);
+        goto done;
+    }
 
   /* Read and verify executable header. */
   if (file_read(file, &ehdr, sizeof ehdr) != sizeof ehdr ||
