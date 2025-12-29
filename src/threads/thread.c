@@ -430,7 +430,7 @@ static void init_thread(struct thread* t, const char* name, int priority) {
   t->priority = priority;
   t->pcb = NULL;
   t->magic = THREAD_MAGIC;
-
+  t->ticks_pass = 0;
   old_level = intr_disable();
   list_push_back(&all_list, &t->allelem);
   intr_set_level(old_level);
@@ -564,3 +564,14 @@ static tid_t allocate_tid(void) {
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof(struct thread, stack);
+
+
+// my function
+void thread_check_block(struct thread *cur, void *aux UNUSED) {
+  if (cur->ticks_pass > 0 && cur->status == THREAD_BLOCKED) {
+    cur->ticks_pass--;
+    if (cur->ticks_pass == 0) {
+      thread_unblock(cur);
+    }
+  }
+}

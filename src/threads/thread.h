@@ -100,6 +100,7 @@ struct thread {
 
   /* Owned by thread.c. */
   unsigned magic; /* Detects stack overflow. */
+  int64_t ticks_pass;
 };
 
 /* Types of scheduler that the user can request the kernel
@@ -149,4 +150,7 @@ void thread_set_nice(int);
 int thread_get_recent_cpu(void);
 int thread_get_load_avg(void);
 
+
+// my function
+void thread_check_block(struct thread *cur, void *aux UNUSED);
 #endif /* threads/thread.h */
