@@ -72,6 +72,10 @@ static struct thread* thread_schedule_fair(void);
 static struct thread* thread_schedule_mlfqs(void);
 static struct thread* thread_schedule_reserved(void);
 
+/*my function*/
+bool compare_priority(struct list_elem *a, struct list_elem *b, void *aux UNUSED);
+
+
 /* Determines which scheduler the kernel should use.
    Controlled by the kernel command-line options
     "-sched=fifo", "-sched=prio",
@@ -236,6 +240,8 @@ static void thread_enqueue(struct thread* t) {
 
   if (active_sched_policy == SCHED_FIFO)
     list_push_back(&fifo_ready_list, &t->elem);
+  else if (active_sched_policy == SCHED_PRIO)
+    list_insert_ordered(&fifo_ready_list, &t->elem, (list_less_func *)compare_priority, NULL);
   else
     PANIC("Unimplemented scheduling policy value: %d", active_sched_policy);
 }
@@ -432,7 +438,8 @@ static void init_thread(struct thread* t, const char* name, int priority) {
   t->magic = THREAD_MAGIC;
   t->ticks_pass = 0;
   old_level = intr_disable();
-  list_push_back(&all_list, &t->allelem);
+  // list_push_back(&all_list, &t->allelem);
+  list_insert_ordered(&all_list, &t->allelem, (list_less_func *)compare_priority, NULL);
   intr_set_level(old_level);
 }
 
@@ -456,8 +463,15 @@ static struct thread* thread_schedule_fifo(void) {
 }
 
 /* Strict priority scheduler */
+// static struct thread* thread_schedule_prio(void) {
+//   PANIC("Unimplemented scheduler policy: \"-sched=prio\"");
+// }
 static struct thread* thread_schedule_prio(void) {
-  PANIC("Unimplemented scheduler policy: \"-sched=prio\"");
+  if (!list_empty(&fifo_ready_list))
+    return list_entry(list_pop_front(&fifo_ready_list),
+                      struct thread, elem);
+  else
+    return idle_thread;
 }
 
 /* Fair priority scheduler */
@@ -574,4 +588,8 @@ void thread_check_block(struct thread *cur, void *aux UNUSED) {
       thread_unblock(cur);
     }
   }
+}
+
+bool compare_priority(struct list_elem *a, struct list_elem *b, void *aux UNUSED) {
+  return list_entry(a, struct thread, elem)->priority > list_entry(b, struct thread, elem)->priority;
 }
