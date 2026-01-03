@@ -87,7 +87,7 @@ struct thread {
   enum thread_status status; /* Thread state. */
   char name[16];             /* Name (for debugging purposes). */
   uint8_t* stack;            /* Saved stack pointer. */
-  int priority;              /* Priority. */
+  int priority;              /* Priority currently using!!!!!!!!!!!!!!!. */
   struct list_elem allelem;  /* List element for all threads list. */
 
   /* Shared between thread.c and synch.c. */
@@ -101,6 +101,12 @@ struct thread {
   /* Owned by thread.c. */
   unsigned magic; /* Detects stack overflow. */
   int64_t ticks_pass;
+
+  // strict priority scheduler
+  int base_priority;            // orginal priority set by user
+  struct lock *wait_on_lock;    // 记录当前等待哪一把锁
+  struct list locks;            // 当前线程持有的锁,可以是不止一个
+
 };
 
 /* Types of scheduler that the user can request the kernel
@@ -153,4 +159,5 @@ int thread_get_load_avg(void);
 
 // my function
 void thread_check_block(struct thread *cur, void *aux UNUSED);
+bool compare_priority(struct list_elem* a, struct list_elem* b, void* aux UNUSED);
 #endif /* threads/thread.h */

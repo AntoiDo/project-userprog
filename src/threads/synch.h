@@ -20,6 +20,7 @@ void sema_self_test(void);
 struct lock {
   struct thread* holder;      /* Thread holding lock (for debugging). */
   struct semaphore semaphore; /* Binary semaphore controlling access. */
+  struct list_elem elem;      // 用于挂到thread->locks里面的元素
 };
 
 void lock_init(struct lock*);
@@ -58,5 +59,6 @@ void rw_lock_release(struct rw_lock*, bool reader);
    optimization barrier.  See "Optimization Barriers" in the
    reference guide for more information.*/
 #define barrier() asm volatile("" : : : "memory")
+void refresh_priority(struct thread* t);
 
 #endif /* threads/synch.h */

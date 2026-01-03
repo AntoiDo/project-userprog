@@ -73,8 +73,7 @@ static struct thread* thread_schedule_mlfqs(void);
 static struct thread* thread_schedule_reserved(void);
 
 /*my function*/
-bool compare_priority(struct list_elem *a, struct list_elem *b, void *aux UNUSED);
-
+bool compare_priority(struct list_elem* a, struct list_elem* b, void* aux UNUSED);
 
 /* Determines which scheduler the kernel should use.
    Controlled by the kernel command-line options
@@ -212,7 +211,7 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
 
   /* Add to run queue. */
   thread_unblock(t);
-
+  thread_yield();
   return tid;
 }
 
@@ -241,7 +240,7 @@ static void thread_enqueue(struct thread* t) {
   if (active_sched_policy == SCHED_FIFO)
     list_push_back(&fifo_ready_list, &t->elem);
   else if (active_sched_policy == SCHED_PRIO)
-    list_insert_ordered(&fifo_ready_list, &t->elem, (list_less_func *)compare_priority, NULL);
+    list_insert_ordered(&fifo_ready_list, &t->elem, (list_less_func*)compare_priority, NULL);
   else
     PANIC("Unimplemented scheduling policy value: %d", active_sched_policy);
 }
@@ -264,6 +263,9 @@ void thread_unblock(struct thread* t) {
   thread_enqueue(t);
   t->status = THREAD_READY;
   intr_set_level(old_level);
+  // if (thread_current()->priority < t->priority) {
+  //   thread_yield();
+  // }
 }
 
 /* Returns the name of the running thread. */
@@ -334,14 +336,26 @@ void thread_foreach(thread_action_func* func, void* aux) {
 }
 
 /* Sets the current thread's priority to NEW_PRIORITY. */
-void thread_set_priority(int new_priority) { thread_current()->priority = new_priority; }
+// void thread_set_priority(int new_priority) { thread_current()->priority = new_priority; }
+void thread_set_priority(int new_priority) {
+  struct thread* cur = thread_current();
+  // printf("current thread:priority: %d, base_priority: %d\n", cur->priority, cur->base_priority);
+  cur->base_priority = new_priority;
+  refresh_priority(cur);
+  // printf("CHANGED current thread:priority: %d, base_priority: %d\n", cur->priority, cur->base_priority);
+
+  if (!list_empty(&fifo_ready_list)) {
+    struct thread* t = list_entry(list_front(&fifo_ready_list), struct thread, elem);
+    if (t->priority > cur->priority)
+      thread_yield();
+  }
+}
 
 /* Returns the current thread's priority. */
 int thread_get_priority(void) { return thread_current()->priority; }
 
 /* Sets the current thread's nice value to NICE. */
-void thread_set_nice(int nice UNUSED) { /* Not yet implemented. */
-}
+void thread_set_nice(int nice UNUSED) { /* Not yet implemented. */ }
 
 /* Returns the current thread's nice value. */
 int thread_get_nice(void) {
@@ -434,12 +448,15 @@ static void init_thread(struct thread* t, const char* name, int priority) {
   strlcpy(t->name, name, sizeof t->name);
   t->stack = (uint8_t*)t + PGSIZE;
   t->priority = priority;
+  t->base_priority = priority;
   t->pcb = NULL;
   t->magic = THREAD_MAGIC;
   t->ticks_pass = 0;
+  t->wait_on_lock = NULL;
+  list_init(&t->locks);
   old_level = intr_disable();
   // list_push_back(&all_list, &t->allelem);
-  list_insert_ordered(&all_list, &t->allelem, (list_less_func *)compare_priority, NULL);
+  list_insert_ordered(&all_list, &t->allelem, (list_less_func*)compare_priority, NULL);
   intr_set_level(old_level);
 }
 
@@ -468,8 +485,7 @@ static struct thread* thread_schedule_fifo(void) {
 // }
 static struct thread* thread_schedule_prio(void) {
   if (!list_empty(&fifo_ready_list))
-    return list_entry(list_pop_front(&fifo_ready_list),
-                      struct thread, elem);
+    return list_entry(list_pop_front(&fifo_ready_list), struct thread, elem);
   else
     return idle_thread;
 }
@@ -579,9 +595,8 @@ static tid_t allocate_tid(void) {
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof(struct thread, stack);
 
-
 // my function
-void thread_check_block(struct thread *cur, void *aux UNUSED) {
+void thread_check_block(struct thread* cur, void* aux UNUSED) {
   if (cur->ticks_pass > 0 && cur->status == THREAD_BLOCKED) {
     cur->ticks_pass--;
     if (cur->ticks_pass == 0) {
@@ -590,6 +605,7 @@ void thread_check_block(struct thread *cur, void *aux UNUSED) {
   }
 }
 
-bool compare_priority(struct list_elem *a, struct list_elem *b, void *aux UNUSED) {
-  return list_entry(a, struct thread, elem)->priority > list_entry(b, struct thread, elem)->priority;
+bool compare_priority(struct list_elem* a, struct list_elem* b, void* aux UNUSED) {
+  return list_entry(a, struct thread, elem)->priority >
+         list_entry(b, struct thread, elem)->priority;
 }

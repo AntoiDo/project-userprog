@@ -63,7 +63,8 @@ void sema_down(struct semaphore* sema) {
 
   old_level = intr_disable();
   while (sema->value == 0) {
-    list_push_back(&sema->waiters, &thread_current()->elem);
+    // list_push_back(&sema->waiters, &thread_current()->elem);
+    list_insert_ordered(&sema->waiters, &thread_current()->elem, (list_less_func*)compare_priority, NULL);
     thread_block();
   }
   sema->value--;
@@ -161,6 +162,25 @@ void lock_init(struct lock* lock) {
   sema_init(&lock->semaphore, 1);
 }
 
+/**
+ * 捐献优先级给cur等待的锁的holder
+ */
+void donate_priority(struct thread* donor) {
+  struct lock* lock = donor->wait_on_lock;
+  struct thread* t = donor;
+
+  while (lock && lock->holder) {
+    struct thread* holder = lock->holder;
+    if (t->priority > lock->holder->priority) {
+      lock->holder->priority = t->priority; // 捐赠了
+      t = holder;
+      lock = t->wait_on_lock;
+    } else {
+      break;
+    }
+  }
+}
+
 /* Acquires LOCK, sleeping until it becomes available if
    necessary.  The lock must not already be held by the current
    thread.
@@ -174,8 +194,19 @@ void lock_acquire(struct lock* lock) {
   ASSERT(!intr_context());
   ASSERT(!lock_held_by_current_thread(lock));
 
+  struct thread* cur = thread_current();
+  if (lock && lock->holder != NULL && cur->priority > lock->holder->priority) {
+    // 当前进程优先级大于拥有锁的进程优先级，准备donation
+    cur->wait_on_lock = lock;
+    donate_priority(cur);
+  }
+
   sema_down(&lock->semaphore);
-  lock->holder = thread_current();
+
+  cur->wait_on_lock = NULL;
+  lock->holder = cur;
+  // lock->holder = thread_current();
+  list_push_back(&cur->locks, &lock->elem); //  记录当前进程持有的锁
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -196,6 +227,21 @@ bool lock_try_acquire(struct lock* lock) {
   return success;
 }
 
+void refresh_priority(struct thread* t) {
+  t->priority = t->base_priority;
+
+  struct list_elem* e;
+  for (e = list_begin(&t->locks); e != list_end(&t->locks); e = list_next(e)) {
+    struct lock* lock = list_entry(e, struct lock, elem);
+    if (!list_empty(&lock->semaphore.waiters)) {
+      struct thread* w = list_entry(list_front(&lock->semaphore.waiters), struct thread, elem);
+
+      if (w->priority > t->priority)
+        t->priority = w->priority;
+    }
+  }
+}
+
 /* Releases LOCK, which must be owned by the current thread.
 
    An interrupt handler cannot acquire a lock, so it does not
@@ -204,8 +250,12 @@ bool lock_try_acquire(struct lock* lock) {
 void lock_release(struct lock* lock) {
   ASSERT(lock != NULL);
   ASSERT(lock_held_by_current_thread(lock));
+  struct thread* cur = thread_current();
 
+  list_remove(&lock->elem);
   lock->holder = NULL;
+
+  refresh_priority(cur);
   sema_up(&lock->semaphore);
 }
 
@@ -291,6 +341,16 @@ void cond_init(struct condition* cond) {
   list_init(&cond->waiters);
 }
 
+bool cond_priority_cmp(const struct list_elem* a, const struct list_elem* b, void* aux UNUSED) {
+  struct semaphore_elem* sa = list_entry(a, struct semaphore_elem, elem);
+  struct semaphore_elem* sb = list_entry(b, struct semaphore_elem, elem);
+
+  struct thread* ta = list_entry(list_front(&sa->semaphore.waiters), struct thread, elem);
+  struct thread* tb = list_entry(list_front(&sb->semaphore.waiters), struct thread, elem);
+
+  return ta->priority > tb->priority;
+}
+
 /* Atomically releases LOCK and waits for COND to be signaled by
    some other piece of code.  After COND is signaled, LOCK is
    reacquired before returning.  LOCK must be held before calling
@@ -320,7 +380,8 @@ void cond_wait(struct condition* cond, struct lock* lock) {
   ASSERT(lock_held_by_current_thread(lock));
 
   sema_init(&waiter.semaphore, 0);
-  list_push_back(&cond->waiters, &waiter.elem);
+  // list_push_back(&cond->waiters, &waiter.elem);
+  list_insert_ordered(&cond->waiters, &waiter.elem, cond_priority_cmp, NULL);
   lock_release(lock);
   sema_down(&waiter.semaphore);
   lock_acquire(lock);
