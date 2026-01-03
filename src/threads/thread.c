@@ -266,6 +266,10 @@ void thread_unblock(struct thread* t) {
   // if (thread_current()->priority < t->priority) {
   //   thread_yield();
   // }
+  if (!intr_context() && thread_current() != idle_thread &&
+      t->priority > thread_current()->priority) {
+    thread_yield();
+  }
 }
 
 /* Returns the name of the running thread. */
