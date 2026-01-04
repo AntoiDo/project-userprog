@@ -168,6 +168,8 @@ void lock_init(struct lock* lock) {
  * 捐献优先级给cur等待的锁的holder
  */
 void donate_priority(struct thread* donor) {
+  if (active_sched_policy == SCHED_FAIR)
+    return;
   struct lock* lock = donor->wait_on_lock;
   struct thread* t = donor;
 

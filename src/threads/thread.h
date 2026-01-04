@@ -18,7 +18,7 @@ enum thread_status {
 /* Thread identifier type.
    You can redefine this to whatever type you like. */
 typedef int tid_t;
-#define TID_ERROR ((tid_t)-1) /* Error value for tid_t. */
+#define TID_ERROR ((tid_t) - 1) /* Error value for tid_t. */
 
 /* Thread priorities. */
 #define PRI_MIN 0      /* Lowest priority. */
@@ -103,10 +103,16 @@ struct thread {
   int64_t ticks_pass;
 
   // strict priority scheduler
-  int base_priority;            // orginal priority set by user
-  struct lock *wait_on_lock;    // 记录当前等待哪一把锁
-  struct list locks;            // 当前线程持有的锁,可以是不止一个
+  int base_priority;         // orginal priority set by user
+  struct lock* wait_on_lock; // 记录当前等待哪一把锁
+  struct list locks;         // 当前线程持有的锁,可以是不止一个
 
+  // mlfqs only
+  int nice;
+  int recent_cpu;
+
+  // fair scheduler
+  int64_t vruntime;
 };
 
 /* Types of scheduler that the user can request the kernel
@@ -124,6 +130,9 @@ enum sched_policy {
  *  "-sched-default", "-sched-fair", "-sched-mlfqs", "-sched-fifo"
  * Is equal to SCHED_FIFO by default. */
 extern enum sched_policy active_sched_policy;
+
+// 用于判断是不是在使用mlfqs
+static inline bool using_mlfqs(void) { return active_sched_policy == SCHED_MLFQS; }
 
 void thread_init(void);
 void thread_start(void);
@@ -156,8 +165,7 @@ void thread_set_nice(int);
 int thread_get_recent_cpu(void);
 int thread_get_load_avg(void);
 
-
 // my function
-void thread_check_block(struct thread *cur, void *aux UNUSED);
+void thread_check_block(struct thread* cur, void* aux UNUSED);
 bool compare_priority(struct list_elem* a, struct list_elem* b, void* aux UNUSED);
 #endif /* threads/thread.h */
